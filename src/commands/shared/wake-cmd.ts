@@ -4,6 +4,7 @@ import { buildCommandInDir, cfgTimeout, loadConfig, saveConfig } from "../../con
 import { resolveWorktreeTarget } from "../../core/matcher/resolve-target";
 import { normalizeTarget } from "../../core/matcher/normalize-target";
 import { assertValidOracleName } from "../../core/fleet/validate";
+import { hasContinuableSession } from "../../core/util/claude-projects";
 import { resolveOracle, findWorktrees, getSessionMap, resolveFleetSession, detectSession, setSessionEnv, sanitizeBranchName } from "./wake-resolve";
 import { attachToSession, ensureSessionRunning, createWorktree } from "./wake-session";
 import { maybeSplit } from "./wake-maybe-split";
@@ -55,7 +56,8 @@ export async function cmdWake(oracle: string, opts: { task?: string; wt?: string
     await tmux.newSession(session, { window: mainWindowName, cwd: repoPath });
     await setSessionEnv(session);
     await new Promise(r => setTimeout(r, 300));
-    await tmux.sendText(`${session}:${mainWindowName}`, buildCommandInDir(mainWindowName, repoPath));
+    const mainFresh = !(await hasContinuableSession(repoPath));
+    await tmux.sendText(`${session}:${mainWindowName}`, buildCommandInDir(mainWindowName, repoPath, { fresh: mainFresh }));
     console.log(`\x1b[32m+\x1b[0m created session '${session}' (main: ${mainWindowName})`);
 
     // Auto-register agent in config.agents so federation peers can route to it (#285)
@@ -77,7 +79,8 @@ export async function cmdWake(oracle: string, opts: { task?: string; wt?: string
         usedNames.add(wtWindowName);
         await tmux.newWindow(session, wtWindowName, { cwd: wt.path });
         await new Promise(r => setTimeout(r, 300));
-        await tmux.sendText(`${session}:${wtWindowName}`, buildCommandInDir(wtWindowName, wt.path));
+        const wtFresh = !(await hasContinuableSession(wt.path));
+        await tmux.sendText(`${session}:${wtWindowName}`, buildCommandInDir(wtWindowName, wt.path, { fresh: wtFresh }));
         console.log(`\x1b[32m+\x1b[0m window: ${wtWindowName}`);
       }
     }
@@ -103,7 +106,8 @@ export async function cmdWake(oracle: string, opts: { task?: string; wt?: string
           usedNames.add(wtWindowName);
           await tmux.newWindow(session, wtWindowName, { cwd: wt.path });
           await new Promise(r => setTimeout(r, 300));
-          await tmux.sendText(`${session}:${wtWindowName}`, buildCommandInDir(wtWindowName, wt.path));
+          const wtFresh = !(await hasContinuableSession(wt.path));
+          await tmux.sendText(`${session}:${wtWindowName}`, buildCommandInDir(wtWindowName, wt.path, { fresh: wtFresh }));
           console.log(`\x1b[32m↻\x1b[0m respawned: ${wtWindowName}`);
         }
       }
@@ -174,8 +178,8 @@ export async function cmdWake(oracle: string, opts: { task?: string; wt?: string
     if (existingWindow) {
       if (opts.prompt) {
         await tmux.selectWindow(`${session}:${existingWindow}`);
-        const escaped = opts.prompt.replace(/'/g, "'\\''");
-        await tmux.sendText(`${session}:${existingWindow}`, `${buildCommandInDir(existingWindow, targetPath)} -p '${escaped}'`);
+        const useFresh = opts.fresh || !(await hasContinuableSession(targetPath));
+        await tmux.sendText(`${session}:${existingWindow}`, buildCommandInDir(existingWindow, targetPath, { fresh: useFresh, prompt: opts.prompt }));
         if (opts.attach) await attachToSession(session);
         await maybeSplit(`${session}:${existingWindow}`, opts);
         return `${session}:${existingWindow}`;
@@ -192,13 +196,9 @@ export async function cmdWake(oracle: string, opts: { task?: string; wt?: string
 
   await tmux.newWindow(session, windowName, { cwd: targetPath });
   await new Promise(r => setTimeout(r, 300));
-  const cmd = buildCommandInDir(windowName, targetPath);
-  if (opts.prompt) {
-    const escaped = opts.prompt.replace(/'/g, "'\\''");
-    await tmux.sendText(`${session}:${windowName}`, `${cmd} -p '${escaped}'`);
-  } else {
-    await tmux.sendText(`${session}:${windowName}`, cmd);
-  }
+  const useFresh = opts.fresh || !(await hasContinuableSession(targetPath));
+  const cmd = buildCommandInDir(windowName, targetPath, { fresh: useFresh, prompt: opts.prompt });
+  await tmux.sendText(`${session}:${windowName}`, cmd);
 
   console.log(`\x1b[32m✅\x1b[0m woke '${windowName}' in ${session} → ${targetPath}`);
   if (opts.attach) await attachToSession(session);
