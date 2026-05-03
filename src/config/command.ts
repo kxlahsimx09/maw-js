@@ -17,6 +17,16 @@ export interface BuildCommandOptions {
    */
   fresh?: boolean;
   /**
+   * Resume a specific Claude session by id (UUID matching the JSONL filename
+   * under `~/.claude/projects/<encoded-cwd>/<id>.jsonl`). Wins over `fresh`
+   * if both are set; emits `claude … --resume "<id>"` with no `||` fallback.
+   * Used by the directed-inbox watcher (Phase 2a) to pin a follow-up wake on
+   * thread N to the same session that handled the prior wake on thread N —
+   * keeps worktree count proportional to (oracle × thread) pairs instead of
+   * ballooning per wake (#worktree-sprawl).
+   */
+  resume?: string;
+  /**
    * First-message prompt for claude. Appended as `-p '<escaped>'`. When the
    * `||` fallback is emitted, the prompt is baked into BOTH branches so it
    * lands regardless of which one runs.
@@ -55,6 +65,17 @@ export function buildCommand(agentName: string, opts?: BuildCommandOptions): str
     } else {
       cmd += ` --resume "${sessionId}"`;
     }
+  }
+
+  // --resume <sid>: caller has told us EXACTLY which session to resume. Strip
+  // any --continue / --resume baked into config (we replace it), drop the `||`
+  // fallback (we trust the caller knows the session is valid), and pass the
+  // explicit session id. Wins over `fresh` so the watcher's resume path is
+  // unconditional.
+  if (opts?.resume) {
+    cmd = cmd.replace(/\s*--continue\b/, "").replace(/\s*--resume\s+"[^"]*"/, "");
+    cmd += ` --resume "${opts.resume}"`;
+    return appendPrompt(cmd, opts.prompt);
   }
 
   // --fresh: strip --continue/--resume, no fallback emitted. Caller is asking for a

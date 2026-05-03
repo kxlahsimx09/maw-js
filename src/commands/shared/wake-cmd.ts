@@ -9,7 +9,7 @@ import { resolveOracle, findWorktrees, getSessionMap, resolveFleetSession, detec
 import { attachToSession, ensureSessionRunning, createWorktree } from "./wake-session";
 import { maybeSplit } from "./wake-maybe-split";
 
-export async function cmdWake(oracle: string, opts: { task?: string; wt?: string; prompt?: string; incubate?: string; fresh?: boolean; attach?: boolean; listWt?: boolean; split?: boolean; repoPath?: string }): Promise<string> {
+export async function cmdWake(oracle: string, opts: { task?: string; wt?: string; prompt?: string; incubate?: string; fresh?: boolean; resume?: string; attach?: boolean; listWt?: boolean; split?: boolean; repoPath?: string }): Promise<string> {
   // Canonicalize the bare name before any lookup — strips trailing `/`, `/.git`, `/.git/`
   // so `maw wake token-oracle/` (tab-completion artifact) resolves the same as `token-oracle`.
   oracle = normalizeTarget(oracle);
@@ -178,8 +178,8 @@ export async function cmdWake(oracle: string, opts: { task?: string; wt?: string
     if (existingWindow) {
       if (opts.prompt) {
         await tmux.selectWindow(`${session}:${existingWindow}`);
-        const useFresh = opts.fresh || !(await hasContinuableSession(targetPath));
-        await tmux.sendText(`${session}:${existingWindow}`, buildCommandInDir(existingWindow, targetPath, { fresh: useFresh, prompt: opts.prompt }));
+        const useFresh = opts.fresh || (!opts.resume && !(await hasContinuableSession(targetPath)));
+        await tmux.sendText(`${session}:${existingWindow}`, buildCommandInDir(existingWindow, targetPath, { fresh: useFresh, resume: opts.resume, prompt: opts.prompt }));
         if (opts.attach) await attachToSession(session);
         await maybeSplit(`${session}:${existingWindow}`, opts);
         return `${session}:${existingWindow}`;
@@ -196,8 +196,11 @@ export async function cmdWake(oracle: string, opts: { task?: string; wt?: string
 
   await tmux.newWindow(session, windowName, { cwd: targetPath });
   await new Promise(r => setTimeout(r, 300));
-  const useFresh = opts.fresh || !(await hasContinuableSession(targetPath));
-  const cmd = buildCommandInDir(windowName, targetPath, { fresh: useFresh, prompt: opts.prompt });
+  // --resume <sid> takes precedence over the filesystem probe: caller has
+  // told us exactly which session to resume, so skip the fresh-or-continue
+  // dance entirely.
+  const useFresh = opts.fresh || (!opts.resume && !(await hasContinuableSession(targetPath)));
+  const cmd = buildCommandInDir(windowName, targetPath, { fresh: useFresh, resume: opts.resume, prompt: opts.prompt });
   await tmux.sendText(`${session}:${windowName}`, cmd);
 
   console.log(`\x1b[32m✅\x1b[0m woke '${windowName}' in ${session} → ${targetPath}`);

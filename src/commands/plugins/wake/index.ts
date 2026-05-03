@@ -50,13 +50,15 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         "--wt": String, "--new": "--wt",
         "--incubate": String, "--issue": Number,
         "--pr": Number, "--repo": String, "--task": String,
-        "--fresh": Boolean, "--attach": Boolean, "-a": "--attach", "--list": Boolean, "--ls": "--list",
+        "--fresh": Boolean, "--resume": String,
+        "--attach": Boolean, "-a": "--attach", "--list": Boolean, "--ls": "--list",
         "--split": Boolean,
       }, 1);
 
       const wakeOpts: {
         task?: string; wt?: string; prompt?: string;
-        incubate?: string; fresh?: boolean; attach?: boolean; listWt?: boolean;
+        incubate?: string; fresh?: boolean; resume?: string;
+        attach?: boolean; listWt?: boolean;
         split?: boolean;
       } = {};
       let issueNum: number | null = flags["--issue"] ?? null;
@@ -72,6 +74,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
       if (flags["--wt"]) wakeOpts.wt = flags["--wt"];
       if (flags["--incubate"]) wakeOpts.incubate = flags["--incubate"];
       if (flags["--fresh"]) wakeOpts.fresh = true;
+      if (flags["--resume"]) wakeOpts.resume = flags["--resume"];
       if (flags["--attach"]) wakeOpts.attach = true;
       if (flags["--list"]) wakeOpts.listWt = true;
       if (flags["--split"]) wakeOpts.split = true;
@@ -103,7 +106,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
     const oracle = body.oracle as string | undefined;
     if (!oracle) return { ok: false, error: "missing oracle name" };
 
-    const wakeOpts: { task?: string; prompt?: string; fresh?: boolean; attach?: boolean } = {};
+    const wakeOpts: { task?: string; prompt?: string; fresh?: boolean; resume?: string; attach?: boolean } = {};
     if (body.task) wakeOpts.task = body.task as string;
     if (body.issue) {
       const issueNum = body.issue as number;
@@ -111,6 +114,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
       if (!wakeOpts.task) wakeOpts.task = `issue-${issueNum}`;
     }
     if (body.fresh) wakeOpts.fresh = true;
+    if (body.resume) wakeOpts.resume = body.resume as string;
     if (body.attach) wakeOpts.attach = true;
 
     await cmdWake(oracle, wakeOpts);

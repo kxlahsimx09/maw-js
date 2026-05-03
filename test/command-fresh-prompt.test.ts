@@ -108,3 +108,33 @@ describe("buildCommand — prompt option", () => {
     expect(out).toBe("claude -p 'do X'");
   });
 });
+
+describe("buildCommand — resume option (Phase 1 worktree-reuse)", () => {
+  test("resume strips --continue + emits --resume <sid>, no fallback", () => {
+    const out = buildCommand("any-agent", { resume: "abc-123" });
+    expect(out).toContain('--resume "abc-123"');
+    expect(out).not.toContain("--continue");
+    expect(out).not.toContain("||");
+  });
+
+  test("resume + prompt: prompt appended once, no fallback", () => {
+    const out = buildCommand("any-agent", { resume: "abc-123", prompt: "do X" });
+    expect(out).toContain('--resume "abc-123"');
+    expect(out).toContain("-p 'do X'");
+    expect(out).not.toContain("||");
+  });
+
+  test("resume wins over fresh: both set → resume path taken", () => {
+    const out = buildCommand("any-agent", { fresh: true, resume: "abc-123" });
+    expect(out).toContain('--resume "abc-123"');
+    expect(out).not.toContain("--continue");
+  });
+
+  test("resume replaces config-baked --continue (does not double-emit)", () => {
+    fakeConfig.commands = { default: "claude --continue --dangerously-skip-permissions" };
+    const out = buildCommand("any-agent", { resume: "uuid-x" });
+    const occurrences = (out.match(/--resume/g) || []).length;
+    expect(occurrences).toBe(1);
+    expect(out).not.toContain("--continue");
+  });
+});
