@@ -154,6 +154,8 @@ export async function invokeDirectHandler(
       "--engine": String, "-e": "--engine",
       "--model": String, "-m": "--model",
       "--reasoning-effort": String,
+      "--config-dir": String,
+      "--env": [String],
       "--dry-run": Boolean,
       "--respawn-worktrees": Boolean,
     }, 0);
@@ -225,6 +227,16 @@ export async function invokeDirectHandler(
     if (flags["--engine"]) opts.engine = flags["--engine"];
     if (flags["--model"]) opts.model = flags["--model"];
     if (flags["--reasoning-effort"]) opts.reasoningEffort = flags["--reasoning-effort"];
+    if (flags["--config-dir"]) opts.configDir = flags["--config-dir"];
+    // --env KEY=VAL (repeatable) → extra env vars prepended to the launch command.
+    // Used to pin an agent to a specific Claude account (CLAUDE_CODE_OAUTH_TOKEN).
+    if (flags["--env"]?.length) {
+      opts.env = {};
+      for (const kv of flags["--env"] as string[]) {
+        const i = kv.indexOf("=");
+        if (i > 0) opts.env[kv.slice(0, i)] = kv.slice(i + 1);
+      }
+    }
 
     // Shorthand: --codex, --gemini etc. → engine from config.commands
     // Unknown flags land in flags._ (permissive mode), so scan for --<engine>

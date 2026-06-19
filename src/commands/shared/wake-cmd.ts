@@ -27,6 +27,11 @@ type CmdWakeOpts = {
   engine?: string;
   model?: string;
   reasoningEffort?: string;
+  /** CLAUDE_CONFIG_DIR for this wake (isolated config/auth dir). */
+  configDir?: string;
+  /** Extra env vars prepended to the launch command (e.g. CLAUDE_CODE_OAUTH_TOKEN
+   *  to pin a specific Claude account while keeping the default config/MCP). */
+  env?: Record<string, string>;
   /** Opt IN to per-worktree respawn (default OFF; thread #14 / owner GO 2026-06-11). */
   respawnWorktrees?: boolean;
 };
@@ -166,7 +171,15 @@ export async function cmdWake(oracle: string, opts: CmdWakeOpts): Promise<string
     // because tmux set-environment only affects NEW shells, not the existing one
     const { getChannelPluginIds, getChannelEnv, getChannelPermissionMode } = await import("./channel-loader");
     const channelIds = getChannelPluginIds(oracle);
-    const channelEnv = getChannelEnv(oracle);
+    // Merge any caller --env / --config-dir into the channel env (prepended to the
+    // launch command). Lets a wake pin a Claude account (CLAUDE_CODE_OAUTH_TOKEN)
+    // or config dir without a channel. Caller env wins over channel config.
+    const channelEnv = {
+      ...getChannelEnv(oracle),
+      ...(opts.configDir ? { CLAUDE_CONFIG_DIR: opts.configDir } : {}),
+      ...(opts.env || {}),
+    };
+    const hasExtraEnv = !!opts.configDir || !!(opts.env && Object.keys(opts.env).length);
     // #1146 — read permissionMode so channel-enabled bots can opt into "relay"
     // (channel-routed prompts) instead of the default "skip" (autonomous).
     const permissionMode = getChannelPermissionMode(oracle);
@@ -181,9 +194,11 @@ export async function cmdWake(oracle: string, opts: CmdWakeOpts): Promise<string
     // see config/command.ts buildCommandInDir.
     const wakeOpts = channelIds.length
       ? { ...runtimeOpts({ resume: opts.resume, fresh: opts.fresh }), channels: channelIds, channelEnv, permissionMode }
-      : (opts.resume || opts.fresh || opts.model || opts.reasoningEffort
-        ? runtimeOpts({ resume: opts.resume, fresh: opts.fresh })
-        : opts.engine);
+      : hasExtraEnv
+        ? { ...runtimeOpts({ resume: opts.resume, fresh: opts.fresh }), channelEnv }
+        : (opts.resume || opts.fresh || opts.model || opts.reasoningEffort
+          ? runtimeOpts({ resume: opts.resume, fresh: opts.fresh })
+          : opts.engine);
     await tmux.sendText(`${session}:${mainWindowName}`, buildCommandInDir(mainWindowName, repoPath, wakeOpts));
     console.log(`\x1b[32m+\x1b[0m created session '${session}' (main: ${mainWindowName})`);
 
