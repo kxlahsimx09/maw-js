@@ -122,6 +122,24 @@ export async function cmdWake(oracle: string, opts: CmdWakeOpts): Promise<string
     ...extra,
   });
 
+  // --config-dir / --env pin a Claude account/config. Hoisted to function scope so
+  // EVERY buildCommandInDir site (new session, fresh worktree window, existing-window
+  // re-launch, respawn loops) injects it — not just the new-session branch. maw
+  // prepends these to the launch command (the existing channelEnv prefix path).
+  const extraEnv: Record<string, string> = {
+    ...(opts.configDir ? { CLAUDE_CONFIG_DIR: opts.configDir } : {}),
+    ...(opts.env || {}),
+  };
+  const hasExtraEnv = Object.keys(extraEnv).length > 0;
+  // Merge extraEnv into any wake-opts value (string engine, object, or undefined).
+  const withEnv = (base: unknown): unknown => {
+    if (!hasExtraEnv) return base;
+    const o: Record<string, unknown> = base && typeof base === "object" ? { ...base as object }
+      : typeof base === "string" ? { engine: base } : {};
+    o.channelEnv = { ...(o.channelEnv as object || {}), ...extraEnv };
+    return o;
+  };
+
   // #673 — extract org/repo slug from ghq path (…/github.com/<org>/<repo>)
   const ghSlug = repoPath.includes("github.com/")
     ? repoPath.slice(repoPath.indexOf("github.com/") + "github.com/".length)
@@ -171,15 +189,8 @@ export async function cmdWake(oracle: string, opts: CmdWakeOpts): Promise<string
     // because tmux set-environment only affects NEW shells, not the existing one
     const { getChannelPluginIds, getChannelEnv, getChannelPermissionMode } = await import("./channel-loader");
     const channelIds = getChannelPluginIds(oracle);
-    // Merge any caller --env / --config-dir into the channel env (prepended to the
-    // launch command). Lets a wake pin a Claude account (CLAUDE_CODE_OAUTH_TOKEN)
-    // or config dir without a channel. Caller env wins over channel config.
-    const channelEnv = {
-      ...getChannelEnv(oracle),
-      ...(opts.configDir ? { CLAUDE_CONFIG_DIR: opts.configDir } : {}),
-      ...(opts.env || {}),
-    };
-    const hasExtraEnv = !!opts.configDir || !!(opts.env && Object.keys(opts.env).length);
+    // Caller --env / --config-dir (extraEnv) wins over channel config.
+    const channelEnv = { ...getChannelEnv(oracle), ...extraEnv };
     // #1146 — read permissionMode so channel-enabled bots can opt into "relay"
     // (channel-routed prompts) instead of the default "skip" (autonomous).
     const permissionMode = getChannelPermissionMode(oracle);
@@ -338,7 +349,7 @@ export async function cmdWake(oracle: string, opts: CmdWakeOpts): Promise<string
         // Prompt is baked into the command by buildCommand (inside the brace
         // group, before the reset suffix). Do NOT append ` -p '…'` here — it
         // would land on the trailing `clear` and the prompt would be lost.
-        await tmux.sendText(`${session}:${existingWindow}`, buildCommandInDir(existingWindow, targetPath, runtimeOpts({ resume: opts.resume, fresh: opts.fresh, prompt: opts.prompt })));
+        await tmux.sendText(`${session}:${existingWindow}`, buildCommandInDir(existingWindow, targetPath, withEnv(runtimeOpts({ resume: opts.resume, fresh: opts.fresh, prompt: opts.prompt }))));
         if (opts.attach) await attachToSession(session);
         await maybeSplit(`${session}:${existingWindow}`, opts);
         return `${session}:${existingWindow}`;
@@ -351,9 +362,9 @@ export async function cmdWake(oracle: string, opts: CmdWakeOpts): Promise<string
 
       if (!agentAlive) {
         console.log(`\x1b[33m⚡\x1b[0m '${existingWindow}' in ${session} — agent dead, re-launching...`);
-        await tmux.sendText(target, buildCommandInDir(existingWindow, targetPath, opts.resume || opts.fresh || opts.model || opts.reasoningEffort
+        await tmux.sendText(target, buildCommandInDir(existingWindow, targetPath, withEnv(opts.resume || opts.fresh || opts.model || opts.reasoningEffort
           ? runtimeOpts({ resume: opts.resume, fresh: opts.fresh })
-          : opts.engine));
+          : opts.engine)));
         if (opts.attach) {
           await tmux.selectWindow(target);
           await attachToSession(session);
@@ -378,9 +389,9 @@ export async function cmdWake(oracle: string, opts: CmdWakeOpts): Promise<string
   // brace group, before the reset suffix. Appending ` -p '…'` to the returned
   // string puts the flag on the trailing `clear`, not `claude`, so the prompt
   // never reaches the agent (the directed-inbox `failed_no_prompt` regression).
-  const cmd = buildCommandInDir(windowName, targetPath, opts.resume || opts.fresh || opts.prompt || opts.model || opts.reasoningEffort
+  const cmd = buildCommandInDir(windowName, targetPath, withEnv(opts.resume || opts.fresh || opts.prompt || opts.model || opts.reasoningEffort
     ? runtimeOpts({ resume: opts.resume, fresh: opts.fresh, prompt: opts.prompt })
-    : opts.engine);
+    : opts.engine));
   await tmux.sendText(`${session}:${windowName}`, cmd);
 
   console.log(`\x1b[32m✅\x1b[0m woke '${windowName}' in ${session} → ${targetPath}`);
