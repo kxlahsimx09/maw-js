@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, copyFi
 import { join } from "path";
 import { tmux } from "../../../sdk";
 import { assertValidOracleName } from "../../../core/fleet/validate";
-import { TEAMS_DIR, loadTeam, resolvePsi, writeShutdownRequest, cleanupTeamDir, creatorEnv, type TeamConfig, type TeamMember } from "./team-helpers";
+import { TEAMS_DIR, loadTeam, resolvePsi, writeShutdownRequest, cleanupTeamDir, creatorEnv, inheritedAccountEnv, type TeamConfig, type TeamMember } from "./team-helpers";
 import { formatError } from "../../../lib/format-error";
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -265,7 +265,11 @@ export async function cmdTeamSpawn(
   const agentType = opts.type || "general-purpose";
   const agentColor = opts.color || ["yellow", "green", "blue", "red", "cyan"][teammateCount % 5];
   const agentId = `${role}@${teamName}`;
-  const envPrefix = "CLAUDECODE=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1";
+  // Inherit the spawning orchestrator's pinned Claude account so the teammate runs
+  // on the SAME account (read from the parent claude's /proc; '' ⇒ default account).
+  const acctEnv = inheritedAccountEnv();
+  if (acctEnv) console.log(`  \x1b[90maccount: inherited from orchestrator (pinned)\x1b[0m`);
+  const envPrefix = `CLAUDECODE=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1${acctEnv ? " " + acctEnv : ""}`;
   const claudeCmd = [
     envPrefix,
     "claude",
